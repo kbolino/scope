@@ -300,6 +300,7 @@ func appMain(flags appFlags) {
 	}
 
 	if flags.tlsEnabled {
+		log.Debugf("TLS enabled")
 		if flags.tlsCert == "" {
 			log.Fatalf("no server certificate supplied for TLS")
 			return
@@ -307,28 +308,34 @@ func appMain(flags appFlags) {
 			log.Fatalf("no private key supplied for TLS")
 			return
 		}
+		log.Debugf("using server certificate: %s", flags.tlsCert)
+		log.Debugf("using private key: %s", flags.tlsKey)
 		var minVersion uint16 = tls.VersionTLS10
-		switch flags.tlsMinVersion {
-		case "", "1.0":
-			// default
-		case "1.1":
-			minVersion = tls.VersionTLS11
-		case "1.2":
-			minVersion = tls.VersionTLS12
-		default:
-			base := 10
-			if strings.HasPrefix(flags.tlsMinVersion, "0x") {
-				base = 16
+		if flags.tlsMinVersion != "" {
+			log.Debugf("setting minimum TLS version: %s", flags.tlsMinVersion)
+			switch flags.tlsMinVersion {
+			case "1.0":
+				minVersion = tls.VersionTLS10
+			case "1.1":
+				minVersion = tls.VersionTLS11
+			case "1.2":
+				minVersion = tls.VersionTLS12
+			default:
+				base := 10
+				if strings.HasPrefix(flags.tlsMinVersion, "0x") {
+					base = 16
+				}
+				val, err := strconv.ParseInt(flags.tlsMinVersion, base, 16)
+				if err != nil {
+					log.Fatalf("parsing value of app.tls.minVersion: %s", err)
+					return
+				}
+				minVersion = uint16(val)
 			}
-			val, err := strconv.ParseInt(flags.tlsMinVersion, base, 16)
-			if err != nil {
-				log.Fatalf("parsing value of app.tls.minVersion: %s", err)
-				return
-			}
-			minVersion = uint16(val)
 		}
 		var cipherSuites []uint16
 		if flags.tlsCipherSuites != "" {
+			log.Debugf("setting TLS cipher suites: %s", flags.tlsCipherSuites)
 			values := strings.Split(flags.tlsCipherSuites, ",")
 			for _, strVal := range values {
 				strVal = strings.TrimSpace(strVal)
@@ -398,6 +405,7 @@ func appMain(flags appFlags) {
 		}
 		var curvePrefs []tls.CurveID
 		if flags.tlsCurvePrefs != "" {
+			log.Debugf("setting TLS curve preferences: %s", flags.tlsCurvePrefs)
 			values := strings.Split(flags.tlsCurvePrefs, ",")
 			for _, strVal := range values {
 				strVal = strings.TrimSpace(strVal)
@@ -436,8 +444,10 @@ func appMain(flags appFlags) {
 			CurvePreferences: curvePrefs,
 		}
 		if flags.tlsClientAuth {
+			log.Debug("TLS client certificate authentication enabled")
 			tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
 			if flags.tlsDNRegexp != "" {
+				log.Debugf("allowing only clients with cert DNs matching regexp: %s", flags.tlsDNRegexp)
 				dnRegexp, err := regexp.Compile(flags.tlsDNRegexp)
 				if err != nil {
 					log.Fatalf("parsing client auth DN regular expression: %s", err)
@@ -448,17 +458,21 @@ func appMain(flags appFlags) {
 					for i, certChain := range verifiedChains {
 						peerCert := certChain[0]
 						peerDN := peerCert.Subject.String()
+						peerDNs[i] = peerDN
+					}
+					log.Debugf("received peer DNs: %s", peerDNs)
+					for _, peerDN := range peerDNs {
 						if dnRegexp.MatchString(peerDN) {
 							log.Infof("allowed client certificate DN: %s", peerDN)
 							return nil
 						}
-						peerDNs[i] = peerDN
 					}
 					return fmt.Errorf("peer DNs do not match allowed regexp: %s", peerDNs)
 				}
 			}
 		}
 		if flags.tlsCACerts != "" {
+			log.Debugf("reading CA certificates from file: %s", flags.tlsCACerts)
 			cacerts, err := ioutil.ReadFile(flags.tlsCACerts)
 			if err != nil {
 				log.Fatalf("reading CA certs file: %s", err)
@@ -481,7 +495,7 @@ func appMain(flags appFlags) {
 	}
 	if flags.tlsEnabled {
 		go func() {
-			log.Info("listening for TLS connections on %s", flags.listen)
+			log.Infof("listening for TLS connections on %s", flags.listen)
 			if err := server.ListenAndServeTLS(flags.tlsCert, flags.tlsKey); err != nil {
 				log.Error(err)
 			}

@@ -470,20 +470,20 @@ func appMain(flags appFlags) {
 					return fmt.Errorf("peer DNs do not match allowed regexp: %s", peerDNs)
 				}
 			}
-		}
-		if flags.tlsCACerts != "" {
-			log.Debugf("reading CA certificates from file: %s", flags.tlsCACerts)
-			cacerts, err := ioutil.ReadFile(flags.tlsCACerts)
-			if err != nil {
-				log.Fatalf("reading CA certs file: %s", err)
-				return
+			if flags.tlsCACerts != "" {
+				log.Debugf("reading CA certificates from file: %s", flags.tlsCACerts)
+				cacerts, err := ioutil.ReadFile(flags.tlsCACerts)
+				if err != nil {
+					log.Fatalf("reading CA certs file: %s", err)
+					return
+				}
+				certPool := x509.NewCertPool()
+				if ok := certPool.AppendCertsFromPEM(cacerts); !ok {
+					log.Fatalf("no PEM certificates found in CA certs file")
+					return
+				}
+				tlsConfig.ClientCAs = certPool
 			}
-			certPool := x509.NewCertPool()
-			if ok := certPool.AppendCertsFromPEM(cacerts); !ok {
-				log.Fatalf("no PEM certificates found in CA certs file")
-				return
-			}
-			tlsConfig.RootCAs = certPool
 		}
 		httpServer.TLSConfig = tlsConfig
 	}

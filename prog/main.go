@@ -149,6 +149,16 @@ type appFlags struct {
 	containerName  string
 	dockerEndpoint string
 
+	tlsEnabled      bool
+	tlsCert         string
+	tlsKey          string
+	tlsCACerts      string
+	tlsMinVersion   string
+	tlsCipherSuites string
+	tlsCurvePrefs   string
+	tlsClientAuth   bool
+	tlsDNRegexp     string
+
 	collectorURL              string
 	s3URL                     string
 	controlRouterURL          string
@@ -337,6 +347,17 @@ func setupFlags(flags *flags) {
 	flag.StringVar(&flags.app.logPrefix, "app.log.prefix", "<app>", "prefix for each log line")
 	flag.BoolVar(&flags.app.logHTTP, "app.log.http", false, "Log individual HTTP requests")
 	flag.BoolVar(&flags.app.logHTTPHeaders, "app.log.httpHeaders", false, "Log HTTP headers. Needs app.log.http to be enabled.")
+
+	// App TLS flags
+	flag.BoolVar(&flags.app.tlsEnabled, "app.tls.enabled", false, "enable SSL/TLS for app")
+	flag.StringVar(&flags.app.tlsCert, "app.tls.cert", "", "path to file containing server certificate in PEM format")
+	flag.StringVar(&flags.app.tlsKey, "app.tls.key", "", "path to file containing private key in PEM format")
+	flag.StringVar(&flags.app.tlsCACerts, "app.tls.caCerts", "", "path to file containing trusted CA certificates in PEM format")
+	flag.StringVar(&flags.app.tlsMinVersion, "app.tls.minVersion", "", "minimum TLS version to use: integer value or one of the strings 1.0, 1.1, or 1.2")
+	flag.StringVar(&flags.app.tlsCipherSuites, "app.tls.cipherSuites", "", "allowed cipher suites: list of comma-separated constant names or integer values")
+	flag.StringVar(&flags.app.tlsCurvePrefs, "app.tls.curvePrefs", "", "preferred elliptic curves: list of comma-separated constant names or integer values")
+	flag.BoolVar(&flags.app.tlsClientAuth, "app.tls.clientAuth", false, "enable client certificate authentication")
+	flag.StringVar(&flags.app.tlsDNRegexp, "app.tls.dnRegexp", "", "regular expression matching client certificate DNs to allow")
 
 	flag.StringVar(&flags.app.weaveAddr, "app.weave.addr", app.DefaultWeaveURL, "Address on which to contact WeaveDNS")
 	flag.StringVar(&flags.app.weaveHostname, "app.weave.hostname", "", "Hostname to advertise in WeaveDNS")

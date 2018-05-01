@@ -1,7 +1,10 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"net/http"
 	_ "net/http/pprof"
@@ -288,23 +291,209 @@ func appMain(flags appFlags) {
 		}.Wrap(handler)
 	}
 
+	httpServer := &http.Server{
+		Addr:           flags.listen,
+		Handler:        handler,
+		ReadTimeout:    httpTimeout,
+		WriteTimeout:   httpTimeout,
+		MaxHeaderBytes: 1 << 20,
+	}
+
+	if flags.tlsEnabled {
+		if flags.tlsCert == "" {
+			log.Fatalf("no server certificate supplied for TLS")
+			return
+		} else if flags.tlsKey == "" {
+			log.Fatalf("no private key supplied for TLS")
+			return
+		}
+		var minVersion uint16 = tls.VersionTLS10
+		switch flags.tlsMinVersion {
+		case "", "1.0":
+			// default
+		case "1.1":
+			minVersion = tls.VersionTLS11
+		case "1.2":
+			minVersion = tls.VersionTLS12
+		default:
+			base := 10
+			if strings.HasPrefix(flags.tlsMinVersion, "0x") {
+				base = 16
+			}
+			val, err := strconv.ParseInt(flags.tlsMinVersion, base, 16)
+			if err != nil {
+				log.Fatalf("parsing value of app.tls.minVersion: %s", err)
+				return
+			}
+			minVersion = uint16(val)
+		}
+		var cipherSuites []uint16
+		if flags.tlsCipherSuites != "" {
+			values := strings.Split(flags.tlsCipherSuites, ",")
+			for _, strVal := range values {
+				strVal = strings.TrimSpace(strVal)
+				if strVal == "" {
+					continue
+				}
+				var cipher uint16
+				switch strings.ToUpper(strVal) {
+				case "TLS_RSA_WITH_RC4_128_SHA":
+					cipher = tls.TLS_RSA_WITH_RC4_128_SHA
+				case "TLS_RSA_WITH_3DES_EDE_CBC_SHA":
+					cipher = tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA
+				case "TLS_RSA_WITH_AES_128_CBC_SHA":
+					cipher = tls.TLS_RSA_WITH_AES_128_CBC_SHA
+				case "TLS_RSA_WITH_AES_256_CBC_SHA":
+					cipher = tls.TLS_RSA_WITH_AES_256_CBC_SHA
+				case "TLS_RSA_WITH_AES_128_CBC_SHA256":
+					cipher = tls.TLS_RSA_WITH_AES_128_CBC_SHA256
+				case "TLS_RSA_WITH_AES_128_GCM_SHA256":
+					cipher = tls.TLS_RSA_WITH_AES_128_GCM_SHA256
+				case "TLS_RSA_WITH_AES_256_GCM_SHA384":
+					cipher = tls.TLS_RSA_WITH_AES_256_GCM_SHA384
+				case "TLS_ECDHE_ECDSA_WITH_RC4_128_SHA":
+					cipher = tls.TLS_ECDHE_ECDSA_WITH_RC4_128_SHA
+				case "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA":
+					cipher = tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA
+				case "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA":
+					cipher = tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA
+				case "TLS_ECDHE_RSA_WITH_RC4_128_SHA":
+					cipher = tls.TLS_ECDHE_RSA_WITH_RC4_128_SHA
+				case "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA":
+					cipher = tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA
+				case "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA":
+					cipher = tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA
+				case "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA":
+					cipher = tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA
+				case "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256":
+					cipher = tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256
+				case "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256":
+					cipher = tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256
+				case "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256":
+					cipher = tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+				case "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256":
+					cipher = tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+				case "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384":
+					cipher = tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+				case "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384":
+					cipher = tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+				case "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305":
+					cipher = tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305
+				case "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305":
+					cipher = tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305
+				default:
+					base := 10
+					if strings.HasPrefix(strVal, "0x") {
+						base = 16
+					}
+					val, err := strconv.ParseUint(strVal, base, 16)
+					if err != nil {
+						log.Fatalf("parsing value of app.tls.cipherSuites: %s", err)
+						return
+					}
+					cipher = uint16(val)
+				}
+				cipherSuites = append(cipherSuites, cipher)
+			}
+		}
+		var curvePrefs []tls.CurveID
+		if flags.tlsCurvePrefs != "" {
+			values := strings.Split(flags.tlsCurvePrefs, ",")
+			for _, strVal := range values {
+				strVal = strings.TrimSpace(strVal)
+				if strVal == "" {
+					continue
+				}
+				var curve tls.CurveID
+				switch strings.ToUpper(strVal) {
+				case "CURVEP256":
+					curve = tls.CurveP256
+				case "CURVEP384":
+					curve = tls.CurveP384
+				case "CURVEP512":
+					curve = tls.CurveP521
+				case "X25519":
+					curve = tls.X25519
+				default:
+					base := 10
+					if strings.HasPrefix(strVal, "0x") {
+						base = 16
+					}
+					val, err := strconv.ParseUint(strVal, base, 16)
+					if err != nil {
+						log.Fatalf("parsing value of app.tls.curvePrefs: %s", err)
+						return
+					}
+					curve = tls.CurveID(val)
+				}
+				curvePrefs = append(curvePrefs, curve)
+
+			}
+		}
+		tlsConfig := &tls.Config{
+			MinVersion:       minVersion,
+			CipherSuites:     cipherSuites,
+			CurvePreferences: curvePrefs,
+		}
+		if flags.tlsClientAuth {
+			tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+			if flags.tlsDNRegexp != "" {
+				dnRegexp, err := regexp.Compile(flags.tlsDNRegexp)
+				if err != nil {
+					log.Fatalf("parsing client auth DN regular expression: %s", err)
+					return
+				}
+				tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+					peerDNs := make([]string, len(verifiedChains))
+					for i, certChain := range verifiedChains {
+						peerCert := certChain[0]
+						peerDN := peerCert.Subject.String()
+						if dnRegexp.MatchString(peerDN) {
+							log.Infof("allowed client certificate DN: %s", peerDN)
+							return nil
+						}
+						peerDNs[i] = peerDN
+					}
+					return fmt.Errorf("peer DNs do not match allowed regexp: %s", peerDNs)
+				}
+			}
+		}
+		if flags.tlsCACerts != "" {
+			cacerts, err := ioutil.ReadFile(flags.tlsCACerts)
+			if err != nil {
+				log.Fatalf("reading CA certs file: %s", err)
+				return
+			}
+			certPool := x509.NewCertPool()
+			if ok := certPool.AppendCertsFromPEM(cacerts); !ok {
+				log.Fatalf("no PEM certificates found in CA certs file")
+				return
+			}
+			tlsConfig.RootCAs = certPool
+		}
+		httpServer.TLSConfig = tlsConfig
+	}
+
 	server := &graceful.Server{
 		// we want to manage the stop condition ourselves below
 		NoSignalHandling: true,
-		Server: &http.Server{
-			Addr:           flags.listen,
-			Handler:        handler,
-			ReadTimeout:    httpTimeout,
-			WriteTimeout:   httpTimeout,
-			MaxHeaderBytes: 1 << 20,
-		},
+		Server:           httpServer,
 	}
-	go func() {
-		log.Infof("listening on %s", flags.listen)
-		if err := server.ListenAndServe(); err != nil {
-			log.Error(err)
-		}
-	}()
+	if flags.tlsEnabled {
+		go func() {
+			log.Info("listening for TLS connections on %s", flags.listen)
+			if err := server.ListenAndServeTLS(flags.tlsCert, flags.tlsKey); err != nil {
+				log.Error(err)
+			}
+		}()
+	} else {
+		go func() {
+			log.Infof("listening on %s", flags.listen)
+			if err := server.ListenAndServe(); err != nil {
+				log.Error(err)
+			}
+		}()
+	}
 
 	// block until INT/TERM
 	common.SignalHandlerLoop()
